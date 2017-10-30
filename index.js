@@ -1,10 +1,14 @@
 const login = require("facebook-chat-api");
-const Slack = require("slack-node"); 
+const Slack = require("slack-node");
+const Slackhook = require('slackhook');
+
+
 const express = require("express")
 
 // https://www.npmjs.com/package/slack-node
 // https://www.npmjs.com/package/facebook-chat-api
 // https://www.npmjs.com/package/express
+// https://github.com/Joezo/node-slackhook
 
 
 // For now it's one to one. There will be a single FB Messenger group that the bot will be invited to
@@ -27,10 +31,23 @@ if(!process.env.CERT) {
 	process.exit(1);
 }
 
+/*
 if(!process.env.SLACKHOOK) {
 	console.log("Please specify the Slack webhook as an environment variable (SLACKHOOK)");
 	process.exit(1);
 }
+*/
+
+if(!process.env.SLACKDOMAIN) {
+	console.log("Please specify the Slack domain as an environment variable (SLACKDOMAIN)");
+	process.exit(1);
+}
+
+if(!process.env.SLACKTOKEN) {
+	console.log("Please specify the Slack token as an environment variable (SLACKTOKEN)");
+	process.exit(1);
+}
+
 
 if(!process.env.FBUSER) {
 	console.log("Please specify the Facebook username as an environment variable (FBUSER)");
@@ -62,8 +79,7 @@ try {
 var credentials = {key: privateKey, cert: certificate};
 
 // Messenger login
-/*
-login({email: "tripsharebota@gmail.com", password: "Tripshareabc123A"}, (err, api) => {
+login({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
     if(err) { 
     	return console.error(err);
     }
@@ -82,18 +98,28 @@ login({email: "tripsharebota@gmail.com", password: "Tripshareabc123A"}, (err, ap
         // api.sendMessage(message.body, message.threadID);
     });
 });
-*/
+
 var app = express()
 var httpsServer = https.createServer(credentials, app);
 
-var slack = new Slack();
+//var slack = new Slack(process.env.SLACKHOOK);
+
+var slackhook = new Slackhook({
+    domain: process.env.SLACKDOMAIN,
+    token: process.env.SLACKTOKEN
+});
+
 
 // From Slack to the the webhook receiver (this code)
 app.post('/webhook', function(req, res){
 	console.log("Slack webhook received");
-	console.log(req);
-	var hook = slack.respond(req.body);
-	res.json({text: 'Hi ' + hook.user_name, username: 'Dr. Nick'});
+	//console.log(req);
+
+	/// This is temporary to test ...
+	// var hook = slackhook.respond(req.body);
+	// res.json({text: 'Hi ' + hook.user_name, username: 'Dr. Nick'});
+
+	// 
 });
 
 try {
