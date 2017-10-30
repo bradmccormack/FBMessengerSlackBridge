@@ -2,6 +2,11 @@ const facebook = require("facebook-chat-api");
 const Slack = require("slack-node");
 const Slackhook = require('slackhook');
 const express = require("express")
+const botname = "FBSlackConnector";
+
+// When a slack webhook is fired, we need to get the trigger automatically and remove it from outgoing messages to Messenger
+// This will do for now.
+const hookTrigger = 'fb';
 
 // I'm learning this as I go. Here are the packages I've used so far.
 // https://www.npmjs.com/package/slack-node
@@ -80,13 +85,43 @@ try {
 
 var credentials = {key: privateKey, cert: certificate};
 
-// Keeps track of any incoming FB threads (Chats)
+// TODO use something like Redis or another simple store so we can have persistance
+
+// Keeps track of FB State
 var FBChatThreadIDs = [];
+var FBUserData = {};
 var FBApi;
 
+// Used for sending to Slack
+var slack = new Slack(process.env.SLACKTOKEN);
+
+// Used for outgoing web hooks
+var slackhook = new Slackhook({
+    domain: process.env.SLACKDOMAIN,
+    token: process.env.SLACKTOKEN
+});
 
 // Keeps track of any incoming Slack Channels
-var SlackChannelIDs = [];
+var SlackChannels = {};
+
+function SendToSlackChannels(from, message) {
+	console.log("Sending message from " + from + " to Slack channels. Message = " + message);
+	if(Object.keys(SlackChannels).length > 0) {
+		Object.keys(SlackChannels).forEach(function(channelID) {
+			try {
+				slack.api('chat.postMessage', {
+	  				text: botname + " (" + from + ") - " +  message,
+	  				channel: channelID
+				}, function(err, response){
+			  		console.log(response);
+				});
+			} catch(err) {
+				// No idea .. this is a quick hack with tight deadlines. Figure out why later and add robust error handling
+				console.log(err + " perhaps channel " + channelID + " doesn't exist anymore.");
+			}
+		});
+	}
+}
 
 // Messenger login
 facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
@@ -100,29 +135,36 @@ facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) =
  
  	// Any conversation that the bot has been joined to
     api.listen((err, message) => {
-    	// TODO look up sender name
-    	// These are all superfluous.. it's just so I know the 
-    	// key names for now
-    	var sender = message.senderID;
-    	var timeStamp = message.timestamp;
-    	var msg = message.body;
-    	var isGroup = message.isGroup;
-    	
-    	console.log("threadID in message = " + ('threadID' in message));
-    	console.log("isGroup in message = " + ('isGroup' in message));
 
-    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup) {
-    		console.log('Found a group');
+    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup && !(message.threadID in FBChatThreadIDs)) {
+    		console.log('Found a group chat');
+    		// TODO change the collection to an object and save more info
     		FBChatThreadIDs.push(message.threadID);
+    		console.log("Sending FB chat join message to Slack");
+    		SendToSlackChannels(botname, 'FB Messenger Chat ' + message.threadID + " just joined");
     	}
-
 
     	console.log(message);
 
-    	// TODO get the facebook user name
-        // api.sendMessage(message.body, message.threadID);
+    	var name = '';
+    	if(!(message.senderID in FBUserData)) {
+			api.getUserInfo([message.senderID], (err, userInfo) => {
+		        if(err) return console.error(err);
 
-        // TODO send to Slack
+		        name = userInfo[message.senderID].name;
+		        // Keep a reference to any user data we care about (at least the name for now so we can post to Slack)
+		        console.log(userInfo);
+		        FBUserData[userInfo.senderID] = {
+		        	name: name
+		        };
+		        console.log("name is " + name);
+		        SendToSlackChannels(name, message.body);
+    		});
+    	} else {
+    		SendToSlackChannels(FBUserData[message.senderID].name, message.body);
+    	}
+
+    	//console.log(message);
     });
 });
 
@@ -135,13 +177,6 @@ app.use(bodyParser.urlencoded({
 
 var httpsServer = https.createServer(credentials, app);
 
-
-var slackhook = new Slackhook({
-    domain: process.env.SLACKDOMAIN,
-    token: process.env.SLACKTOKEN
-});
-
-
 // From Slack to the the webhook receiver (this code)
 app.post('/webhook', function(req, res){
 
@@ -151,21 +186,36 @@ app.post('/webhook', function(req, res){
 
 	var hook = slackhook.respond(req.body);
 	console.log("Slack webhook received from " + hook.user_name + " message = " + hook.text);
+	
+	if((('channel_id' in hook) && hook.channel_id && !(hook.channel_id in SlackChannels))){
+		console.log('');
+		SlackChannels[hook.channel_id] = {
+			name: hook.channel_name,
+			channel_hook_registed_by: hook.user_name
+		}
+		res.json({text: 'This channel has been registed with the ' + botname + " for communication between FB Messenger and Slack"})
+	}
 
+	console.log(hook);
 
 	// If we want to respond back to Slack just respond to the response param
 	// res.json({text: 'Hi ' + hook.user_name, username: 'Dr. Nick'});
 
 	if(FBChatThreadIDs.length > 0) {
-		// Send to FB messenger
-		FBChatThreadIDs.forEach(function(threadID) {
-			FBApi.sendMessage(hook.text, threadID);
-		});
+		try {
+			// Send to FB messenger
+			FBChatThreadIDs.forEach(function(threadID) {
+				// Trim off the hook trigger
+				FBApi.sendMessage(hook.text.substr(hookTrigger.length), threadID);
+			});
+		} catch(err) {
+			// No idea .. this is a quick hack with tight deadlines. Figure out why later and add robust error handling
+    		console.log(err + " perhaps chat " + threadID + " doesn't exist anymore.");
+		}
 	} else {
 		console.log("No FB chats open. Not sending");
+		res.json({text: 'No FB Chats have registed yet - Not sending to FB Messenger'});
 	}
-
-
 });
 
 try {
