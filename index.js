@@ -49,8 +49,14 @@ if(!process.env.SLACKDOMAIN) {
 	process.exit(1);
 }
 
-if(!process.env.SLACKTOKEN) {
-	console.log("Please specify the Slack token as an environment variable (SLACKTOKEN)");
+// This only allows a single hook for all channels (this needs to be improved later)
+if(!process.env.SLACKHOOKTOKEN) {
+	console.log("Please specify the Slack token as an environment variable (SLACKHOOKTOKEN)");
+	process.exit(1);
+}
+
+if(!process.env.SLACKAPITOKEN) {
+	console.log("Please specify the Slack API token as an environment variable (SLACKAPITOKEN)");
 	process.exit(1);
 }
 
