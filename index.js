@@ -94,12 +94,12 @@ var credentials = {key: privateKey, cert: certificate};
 // TODO use something like Redis or another simple store so we can have persistance
 
 // Keeps track of FB State
-var FBChatThreadIDs = [];
+var FBChatThreads = {};
 var FBUserData = {};
 var FBApi;
 
 // Used for sending to Slack
-var slack = new Slack(process.env.SLACKTOKEN);
+var slack = new Slack(process.env.SLACKAPITOKEN);
 
 // Used for outgoing web hooks
 var slackhook = new Slackhook({
@@ -129,6 +129,22 @@ function SendToSlackChannels(from, message) {
 	}
 }
 
+function SendToFaceBookChat(message) {
+	if(Object.keys(FBChatThreads).length > 0) {
+		// Send to FB messenger
+		Object.keys(FBChatThreads).forEach(function(threadID) {
+			try {
+				// Trim off the hook trigger
+				FBApi.sendMessage(message, threadID);
+			} catch(err) {
+				// No idea .. this is a quick hack with tight deadlines. Figure out why later and add robust error handling
+				console.log(err + " perhaps chat " + threadID + " doesn't exist anymore.");
+			}
+		});
+	}
+}
+
+
 // Messenger login
 facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
     
@@ -142,11 +158,17 @@ facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) =
  	// Any conversation that the bot has been joined to
     api.listen((err, message) => {
 
-    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup && !(message.threadID in FBChatThreadIDs)) {
+    	// What's different about the initial mesage being sent from slack and the message that is mirrored back from Messenger ?
+    	console.log(message);
+
+
+    	if(!(message.threadID in FBChatThreads) && message.isGroup) {
+    	//if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup && !(message.threadID in FBChatThreads)) {
     		console.log('Found a group chat');
-    		// TODO change the collection to an object and save more info
-    		FBChatThreadIDs.push(message.threadID);
-    		console.log("Sending FB chat join message to Slack");
+    		// TODO fill out the object
+    		FBChatThreads[message.threadID] = {};
+
+    		//console.log("Sending FB chat join message to Slack");
     		SendToSlackChannels(botname, 'FB Messenger Chat ' + message.threadID + " just joined");
     	}
 
@@ -163,7 +185,6 @@ facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) =
 		        FBUserData[userInfo.senderID] = {
 		        	name: name
 		        };
-		        console.log("name is " + name);
 		        SendToSlackChannels(name, message.body);
     		});
     	} else {
@@ -199,29 +220,20 @@ app.post('/webhook', function(req, res){
 			name: hook.channel_name,
 			channel_hook_registed_by: hook.user_name
 		}
-		res.json({text: 'This channel has been registed with the ' + botname + " for communication between FB Messenger and Slack"})
+		res.json({text: 'This channel has been registed with the ' + botname + " for communication between FB Messenger and Slack"});
 	}
 
-	console.log(hook);
+	//console.log(hook);
 
 	// If we want to respond back to Slack just respond to the response param
 	// res.json({text: 'Hi ' + hook.user_name, username: 'Dr. Nick'});
 
-	if(FBChatThreadIDs.length > 0) {
-		try {
-			// Send to FB messenger
-			FBChatThreadIDs.forEach(function(threadID) {
-				// Trim off the hook trigger
-				FBApi.sendMessage(hook.text.substr(hookTrigger.length), threadID);
-			});
-		} catch(err) {
-			// No idea .. this is a quick hack with tight deadlines. Figure out why later and add robust error handling
-    		console.log(err + " perhaps chat " + threadID + " doesn't exist anymore.");
-		}
-	} else {
-		console.log("No FB chats open. Not sending");
-		res.json({text: 'No FB Chats have registed yet - Not sending to FB Messenger'});
-	}
+  	if(Object.keys(FBChatThreads).length > 0) {
+		SendToFaceBookChat(hook.text.substr(hookTrigger.length))
+  	} else {
+  		res.json({text: 'No FB Chats have registed yet - Not sending to FB Messenger'});
+  		console.log("No FB chats open. Not sending");
+  	}
 });
 
 try {
