@@ -1,14 +1,15 @@
-const login = require("facebook-chat-api");
+const facebook = require("facebook-chat-api");
 const Slack = require("slack-node");
 const Slackhook = require('slackhook');
-
-
 const express = require("express")
 
+// I'm learning this as I go. Here are the packages I've used so far.
 // https://www.npmjs.com/package/slack-node
 // https://www.npmjs.com/package/facebook-chat-api
 // https://www.npmjs.com/package/express
 // https://github.com/Joezo/node-slackhook
+// https://www.npmjs.com/package/body-parser
+
 
 
 // For now it's one to one. There will be a single FB Messenger group that the bot will be invited to
@@ -65,6 +66,7 @@ var fs = require('fs');
 var http = require('http');
 var https = require('https');
 
+
 var privateKey;
 var certificate;
 
@@ -78,8 +80,14 @@ try {
 
 var credentials = {key: privateKey, cert: certificate};
 
+// Keeps track of any incoming FB threads (Chats)
+var FBChatThreadIDs = [];
+
+// Keeps track of any incoming Slack Channels
+var SlackChannelIDs = [];
+
 // Messenger login
-login({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
+facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
     if(err) { 
     	return console.error(err);
     }
@@ -93,16 +101,30 @@ login({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
     	var timeStamp = message.timestamp;
     	var msg = message.body;
     	var isGroup = message.isGroup;
+    	
+    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup == 'true') {
+    		FBChatGroupIDs.push(message.threadID);
+    	}
+
 
     	console.log(message);
+
+    	// TODO get the facebook user name
         // api.sendMessage(message.body, message.threadID);
+
+        // TODO send to Slack
     });
 });
 
-var app = express()
+var app = express();
+var bodyParser = require('body-parser')
+
+app.use(bodyParser.urlencoded({
+  extended: true
+}));
+
 var httpsServer = https.createServer(credentials, app);
 
-//var slack = new Slack(process.env.SLACKHOOK);
 
 var slackhook = new Slackhook({
     domain: process.env.SLACKDOMAIN,
@@ -112,14 +134,25 @@ var slackhook = new Slackhook({
 
 // From Slack to the the webhook receiver (this code)
 app.post('/webhook', function(req, res){
-	console.log("Slack webhook received");
-	//console.log(req);
 
-	/// This is temporary to test ...
-	// var hook = slackhook.respond(req.body);
+	if(!('body' in req)) {
+		console.log("body isn't present in the request.. why");
+	}
+
+	var hook = slackhook.respond(req.body);
+	console.log("Slack webhook received from " + hook.user_name + " message = " + hook.text);
+
+
+	// If we want to respond back to Slack just respond to the response param
 	// res.json({text: 'Hi ' + hook.user_name, username: 'Dr. Nick'});
 
-	// 
+	if(FBChatThreadIDs.length > 0) {
+		// Send to FB messenger
+	} else {
+		console.log("No FB chats open. Not sending");
+	}
+
+
 });
 
 try {
