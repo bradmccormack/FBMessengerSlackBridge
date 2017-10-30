@@ -82,15 +82,21 @@ var credentials = {key: privateKey, cert: certificate};
 
 // Keeps track of any incoming FB threads (Chats)
 var FBChatThreadIDs = [];
+var FBApi;
+
 
 // Keeps track of any incoming Slack Channels
 var SlackChannelIDs = [];
 
 // Messenger login
 facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) => {
+    
     if(err) { 
     	return console.error(err);
     }
+
+    // Save a reference for the Slack webhook to use
+    FBApi = api;
  
  	// Any conversation that the bot has been joined to
     api.listen((err, message) => {
@@ -102,8 +108,12 @@ facebook({email: process.env.FBUSER, password: process.env.FBPASS}, (err, api) =
     	var msg = message.body;
     	var isGroup = message.isGroup;
     	
-    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup == 'true') {
-    		FBChatGroupIDs.push(message.threadID);
+    	console.log("threadID in message = " + ('threadID' in message));
+    	console.log("isGroup in message = " + ('isGroup' in message));
+
+    	if((('threadID' in message) && message.threadID) && ('isGroup' in message) && message.isGroup) {
+    		console.log('Found a group');
+    		FBChatThreadIDs.push(message.threadID);
     	}
 
 
@@ -148,6 +158,9 @@ app.post('/webhook', function(req, res){
 
 	if(FBChatThreadIDs.length > 0) {
 		// Send to FB messenger
+		FBChatThreadIDs.forEach(function(threadID) {
+			FBApi.sendMessage(hook.text, threadID);
+		});
 	} else {
 		console.log("No FB chats open. Not sending");
 	}
